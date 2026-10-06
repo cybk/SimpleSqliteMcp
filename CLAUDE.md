@@ -34,6 +34,8 @@ los errores del servidor salen por stderr como tracebacks muy largos, así que d
   por sí solo (`WITH … DELETE` lo pasa); la protección real es `mode=ro`. No añadir herramientas de escritura.
 - **Ruta de la base:** variable de entorno `VACATIONS_DB`; por defecto `Vacations.db` junto a `server.py`.
 - Las herramientas devuelven `dict` (salida estructurada) y llevan `ToolAnnotations(readOnlyHint=True)`.
+- Las salidas nunca incluyen llaves (`Id`, `UserId`, `RequestId`): se filtran con `_without_keys`
+  (también en `run_select_query`). Se pueden usar internamente, p. ej. para contar personas distintas.
 - `overlapping_vacations` calcula en Python, día por día, qué personas coinciden y agrupa días
   consecutivos con el mismo grupo en tramos.
 

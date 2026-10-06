@@ -25,6 +25,9 @@ MAX_ROWS = 500
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, idempotentHint=True, openWorldHint=False)
 
+# Llaves primarias/foráneas que se usan internamente pero no se devuelven al cliente.
+_KEY_COLUMNS = {"id", "requestid", "userid"}
+
 mcp = MCPServer(
     name="vacations",
     instructions=(
@@ -67,6 +70,10 @@ def _check_range(start: date, end: date) -> None:
         raise ToolError(f"La fecha final ({end}) es anterior a la inicial ({start}).")
 
 
+def _without_keys(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [{k: v for k, v in r.items() if k.lower() not in _KEY_COLUMNS} for r in rows]
+
+
 def _requests_overlapping(start: date, end: date) -> list[dict[str, Any]]:
     """Solicitudes cuyo rango [StartDate, EndDate] se cruza con [start, end]."""
     return _query(
@@ -100,7 +107,7 @@ def vacations_in_period(start_date: str, end_date: str) -> dict[str, Any]:
     return {
         "period": {"start": start.isoformat(), "end": end.isoformat()},
         "people_count": len({r["UserId"] for r in rows}),
-        "requests": rows,
+        "requests": _without_keys(rows),
     }
 
 
@@ -119,7 +126,7 @@ def remaining_vacation_days(name: str | None = None, year: int | None = None) ->
     year = year or date.today().year
     rows = _query(
         """
-        SELECT u.UserId, u.UserName, u.Email,
+        SELECT u.UserName, u.Email,
                u.AvailablePtos AS TotalDays,
                COALESCE(SUM(r.RequestedDays), 0) AS UsedDays,
                u.AvailablePtos - COALESCE(SUM(r.RequestedDays), 0) AS RemainingDays
@@ -150,7 +157,7 @@ def vacations_next_week(reference_date: str | None = None) -> dict[str, Any]:
     return {
         "week": {"start": start.isoformat(), "end": end.isoformat()},
         "people_count": len({r["UserId"] for r in rows}),
-        "requests": rows,
+        "requests": _without_keys(rows),
     }
 
 
@@ -206,7 +213,7 @@ def people_without_vacations(year: int | None = None) -> dict[str, Any]:
     year = year or date.today().year
     rows = _query(
         """
-        SELECT u.UserId, u.UserName, u.Email, u.AvailablePtos AS RemainingDays
+        SELECT u.UserName, u.Email, u.AvailablePtos AS RemainingDays
         FROM Users u
         WHERE NOT EXISTS (
             SELECT 1 FROM VacationRequests r
@@ -236,6 +243,8 @@ def run_select_query(sql: str) -> dict[str, Any]:
     """Ejecuta una consulta SQL de solo lectura (SELECT/WITH) para preguntas no cubiertas
     por las demás herramientas. Devuelve como máximo 500 filas.
 
+    Las columnas de llaves (Id, UserId) se pueden usar en JOIN/WHERE, pero se omiten del resultado.
+
     Args:
         sql: Una única sentencia SELECT de SQLite.
     """
@@ -243,7 +252,7 @@ def run_select_query(sql: str) -> dict[str, Any]:
         raise ToolError("Solo se permiten consultas SELECT o WITH.")
     try:
         with _connect() as conn:
-            rows = [dict(r) for r in conn.execute(sql).fetchmany(MAX_ROWS + 1)]
+            rows = _without_keys([dict(r) for r in conn.execute(sql).fetchmany(MAX_ROWS + 1)])
     except sqlite3.Error as exc:
         raise ToolError(f"Error de SQLite: {exc}") from exc
     return {"row_count": min(len(rows), MAX_ROWS), "truncated": len(rows) > MAX_ROWS, "rows": rows[:MAX_ROWS]}
